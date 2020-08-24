@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 from numba import njit, prange
+from pykinect_load import *
 
 def homogenous(x):
     return np.vstack([x, np.ones(x.shape[1])])
@@ -25,13 +26,6 @@ def writePLY(filename, X):
         ply_file.write("%f %f %f %d %d %d\n" % (X[i,0], X[i,1], X[i,2], X[i,3],X[i,4],X[i,5]))
 
 
-@njit(parallel=True)
-def raycast(voxel):
-    img_d = img_d.reshape(-1)
-
-    for i in prange(img_d.shape[0]):
-        print("asdf")
-
 if __name__ == "__main__":
     # intrinsics
     K = np.loadtxt('data/camera-intrinsics.txt')
@@ -43,6 +37,8 @@ if __name__ == "__main__":
     img_rgb = cv2.cvtColor(cv2.imread('data/frame-%06d.color.jpg' % frame_number), cv2.COLOR_BGR2RGB)
     img_d = cv2.imread('data/frame-%06d.depth.png' % frame_number, -1).astype(float)
     img_d = img_d / 1000.
+
+
     pose = np.loadtxt('data/frame-%06d.pose.txt' % frame_number)
 
     # pixel coordinates
@@ -71,8 +67,8 @@ if __name__ == "__main__":
     voxel_shape = ((voxel_max - voxel_min) / voxel_size).astype(int)[:3]
 
     voxel = np.ones(voxel_shape)
-    voxel_coords = np.concatenate([x.reshape(1, -1) for x in np.meshgrid(*[range(i) for i in voxel_shape],indexing='ij')], axis=0).T
-    voxel_coords = voxel_coords * voxel_size + voxel_min
+    voxel_coords_ind = np.concatenate([x.reshape(1, -1) for x in np.meshgrid(*[range(i) for i in voxel_shape],indexing='ij')], axis=0).T
+    voxel_coords = voxel_coords_ind * voxel_size + voxel_min
 
     voxel_coords_cam = np.matmul(np.linalg.inv(pose), homogenous(voxel_coords.T))[:3]
 
@@ -84,8 +80,24 @@ if __name__ == "__main__":
 
     # only consider voxels inside the pixel range
     valid_ind = np.logical_and(pix_x == np.clip(pix_x, 0, w), pix_y == np.clip(pix_y, 0, h))
-    print(valid_ind)
     
+    voxel_z = voxel_coords_cam[2, valid_ind]
+    voxel_depth = img_d[pix_y[valid_ind].astype(int), pix_x[valid_ind].astype(int)]
+
+    # find voxels within depth +- error range
+    a = 0.1
+    depth_delta = voxel_depth - voxel_z
+    valid_ind2 = np.logical_and(depth_delta < a, depth_delta > -a)
+    ind = voxel_coords_ind[valid_ind][valid_ind2]
+    voxel[ind[:, 0], ind[:, 1], ind[:, 2]] = depth_delta[valid_ind2] / a
+
+    v = (voxel[ind[:, 0], ind[:, 1], ind[:, 2]] + 1) / 2
+    v3 = np.tile(v.reshape(-1, 1), (1, 3))
+
+    #print(np.concatenate([ind, v3], axis=1))
+    writePLY("tsdf.ply", np.concatenate([ind, v3 * 255], axis=1))
+
+    writePLY("rgb_tsdf.ply", np.concatenate([ind , img_rgb[pix_y[valid_ind][valid_ind2].astype(int), pix_x[valid_ind][valid_ind2].astype(int)] * v3], axis=1))
 
 
 
