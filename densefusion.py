@@ -1,10 +1,88 @@
 import numpy as np
 import cv2
-from numba import njit, prange
-from pykinect_load import *
+from numba import jit, njit, prange
+from math import sqrt
+#from pykinect_load import *
 
 def homogenous(x):
     return np.vstack([x, np.ones(x.shape[1])])
+
+@jit(nopython=True)
+def bilinear(x, voxel, doprint=False):
+    a, b, c = map(int, [x[0], x[1], x[2]])
+    a_, b_, c_ = min(a+1, voxel.shape[0]), min(b+1, voxel.shape[1]), min(c+1, voxel.shape[2])
+
+    t,u,v = a_-x[0], b_-x[1], c_-x[2]
+    t_,u_,v_ = 1-t, 1-u, 1-v
+
+
+    if doprint:
+        print(t, u, v, voxel[a][b][c], voxel[a][b][c_], voxel[a][b_][c], voxel[a_][b_][c_], voxel[a_][b][c], voxel[a_][b][c_], voxel[a][b_][c], voxel[a_][b_][c_])
+
+    return (t*u*v*voxel[a][b][c] + t*u*v_*voxel[a][b][c_] + t*u_*v*voxel[a][b_][c] + t*u_*v_*voxel[a][b_][c_]
+    + t_*u*v*voxel[a_][b][c] + t_*u*v_*voxel[a_][b][c_] + t_*u_*v*voxel[a_][b_][c] + t_*u_*v_*voxel[a_][b_][c_])
+
+
+@jit(nopython=True)
+def nearest(x, voxel, doprint=False):
+    return voxel[round(x[0])][round(x[1])][round(x[2])]
+
+
+@jit(nopython=True)
+def project(pose, x):
+    return np.array([pose[0,0]*x[0]+pose[0,1]*x[1]+pose[0,2]*x[2]+pose[0,3], 
+            pose[1,0]*x[0]+pose[1,1]*x[1]+pose[1,2]*x[2]+pose[1,3],
+            pose[2,0]*x[0]+pose[2,1]*x[1]+pose[2,2]*x[2]+pose[2,3]])
+
+@jit(nopython=True)
+def matmul(pose, x):
+    return np.array([pose[0,0]*x[0]+pose[0,1]*x[1]+pose[0,2]*x[2], 
+            pose[1,0]*x[0]+pose[1,1]*x[1]+pose[1,2]*x[2],
+            pose[2,0]*x[0]+pose[2,1]*x[1]+pose[2,2]*x[2]])
+
+@jit(nopython=True)
+def norm(x):
+    return sqrt(x[0]*x[0] + x[1]*x[1] + x[2]*x[2])
+
+
+@njit(parallel = True)
+def raycast(h, w, pose, K_inv, voxel, voxel_size, voxel_min, a):
+    cam_pos = np.array([pose[0,3], pose[1,3], pose[2,3]])
+    epsilon = 0.01
+    iter_n = 40
+
+    img = np.ones((h, w, 3))*256
+
+    for i in prange(h*w):
+        px_point = [i%w, int(i/w), 1]
+        ray = project(pose, matmul(K_inv, px_point)) - cam_pos
+        dist = 1.
+        travel = 0.1
+
+        for j in range(iter_n):
+            x = ray * travel * a + cam_pos
+            x = (x - voxel_min)/voxel_size
+
+            dist = min(bilinear(x, voxel), dist)
+            travel = travel + dist
+
+            if dist < epsilon:
+                # get normal
+                xp = [min(voxel.shape[0], x[0]+1), min(voxel.shape[1], x[1]+1), min(voxel.shape[2], x[2]+1)]
+                xm = [max(0, x[0]-1), max(1, x[1]-1), max(2, x[2]-1)]
+
+                gradient = np.array([-bilinear([xp[0], x[1], x[2]], voxel) + bilinear([xm[0], x[1], x[2]], voxel),
+                                    -bilinear([x[0], xp[1], x[2]], voxel) + bilinear([x[0], xm[1], x[2]], voxel),
+                                    -bilinear([x[0], x[1], xp[2]], voxel) + bilinear([x[0], x[1], xm[2]], voxel)])
+
+                gradient = gradient / norm(gradient)
+                
+                img[px_point[1], px_point[0]] = (gradient * 128 + 128)# * (iter_n - j) / iter_n
+
+                break
+
+
+    return img
 
 def writePLY(filename, X):
 
@@ -38,7 +116,6 @@ if __name__ == "__main__":
     img_d = cv2.imread('data/frame-%06d.depth.png' % frame_number, -1).astype(float)
     img_d = img_d / 1000.
 
-
     pose = np.loadtxt('data/frame-%06d.pose.txt' % frame_number)
 
     # pixel coordinates
@@ -60,6 +137,7 @@ if __name__ == "__main__":
     frustum = np.concatenate([[0], [np.max(img_d)] * 4]) * frustum
     frustum = np.matmul(pose, homogenous(frustum))[:3]
 
+    # create voxel space
     voxel_min = np.min(frustum, axis=1)
     voxel_max = np.max(frustum, axis=1)
 
@@ -70,8 +148,9 @@ if __name__ == "__main__":
     voxel_coords_ind = np.concatenate([x.reshape(1, -1) for x in np.meshgrid(*[range(i) for i in voxel_shape],indexing='ij')], axis=0).T
     voxel_coords = voxel_coords_ind * voxel_size + voxel_min
 
-    voxel_coords_cam = np.matmul(np.linalg.inv(pose), homogenous(voxel_coords.T))[:3]
 
+    # convert to cam, pixel coord
+    voxel_coords_cam = np.matmul(np.linalg.inv(pose), homogenous(voxel_coords.T))[:3]
     voxel_coords_pix = np.matmul(K, voxel_coords_cam)
     voxel_coords_pix = (voxel_coords_pix / voxel_coords_pix[2])[:2]
 
@@ -100,5 +179,11 @@ if __name__ == "__main__":
     writePLY("rgb_tsdf.ply", np.concatenate([ind , img_rgb[pix_y[valid_ind][valid_ind2].astype(int), pix_x[valid_ind][valid_ind2].astype(int)] * v3], axis=1))
 
 
+    raycasted_img = raycast(h,w, pose, K_inv, voxel,voxel_size, voxel_min, a)
 
+    print(raycasted_img)
+    cv2.imshow('image', cv2.cvtColor(raycasted_img.astype(np.uint8), cv2.COLOR_RGB2BGR))
+    #cv2.imshow('image', cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
