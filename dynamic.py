@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 from numba import jit, njit, prange
 from math import sqrt
+from frame import Frame
 #from pykinect_load import *
 
 def homogenous(x):
@@ -112,39 +113,28 @@ if __name__ == "__main__":
     K = np.loadtxt('data/camera-intrinsics.txt')
     K_inv = np.linalg.inv(K)
 
-    warp_field_init = False
+    voxel_min = np.zeros(3,1)
+    voxel_max = np.zeros(3,1)
 
     for frame_number in range(1,2):
-        img_rgb = cv2.cvtColor(cv2.imread('data/frame-%06d.color.jpg' % frame_number), cv2.COLOR_BGR2RGB)
-        img_d = cv2.imread('data/frame-%06d.depth.png' % frame_number, -1).astype(float)
-        img_d = img_d / 1000.
+        frame = Frame(frame_number)
+        w,h = frame.w, frame.h
 
-        pose = np.loadtxt('data/frame-%06d.pose.txt' % frame_number)
 
         """
-        if 
-        # pixel coordinates
-        h,w = img_d.shape[:2]
-        n = h*w
-
-        u = np.array([[i%w, int(i/w)] for i in range(n)]).T # raw pixel index; shape is (2, h*w) 
-        u_ = homogenous(u)   # homogeneous
-
-        # pixels in camera coordinate; shape is (3, h*w)
-        V = img_d.reshape(-1) * np.matmul(K_inv, u_)
-
+        V = frame.pixel_3d_cam()
         writePLY('rgbd.ply', np.hstack([V.T, img_rgb.reshape(-1,3)]))
         """
 
         # area for voxel volume
         # get voxel frustrum
-        frustum = np.matmul(K_inv, np.array([[0, 0, 0], [0, 0, 1], [w, 0, 1], [0, h, 1], [w, h, 1]]).astype(float).T)
-        frustum = np.concatenate([[0], [np.max(img_d)] * 4]) * frustum
-        frustum = np.matmul(pose, homogenous(frustum))[:3]
+        frustum = np.matmul(frame.K_inv, np.array([[0, 0, 0], [0, 0, 1], [w, 0, 1], [0, h, 1], [w, h, 1]]).astype(float).T)
+        frustum = np.concatenate([[0], [np.max(frame.img_d)] * 4]) * frustum
+        frustum = np.matmul(frame.pose, homogenous(frustum))[:3]
 
-    # create voxel space
-    voxel_min = np.min(frustum, axis=1)
-    voxel_max = np.max(frustum, axis=1)
+        # create voxel space
+        voxel_min = np.min(np.hstack([voxel_min, frustum]), axis=1)
+        voxel_max = np.max(np.hstack([voxel_max, frustum]), axis=1)
 
     voxel_size = 0.02
     voxel_shape = ((voxel_max - voxel_min) / voxel_size).astype(int)[:3]
@@ -157,16 +147,11 @@ if __name__ == "__main__":
 
 
     for frame_number in range(1,2):
-        img_rgb = cv2.cvtColor(cv2.imread('data/frame-%06d.color.jpg' % frame_number), cv2.COLOR_BGR2RGB)
-        img_d = cv2.imread('data/frame-%06d.depth.png' % frame_number, -1).astype(float)
-        img_d = img_d / 1000.
-
-        pose = np.loadtxt('data/frame-%06d.pose.txt' % frame_number)
+        frame = Frame(frame_number)
 
         # convert to cam, pixel coord
-        voxel_coords_cam = np.matmul(np.linalg.inv(pose), homogenous(voxel_coords.T))[:3]
-        voxel_coords_pix = np.matmul(K, voxel_coords_cam)
-        voxel_coords_pix = (voxel_coords_pix / voxel_coords_pix[2])[:2]
+        voxel_coords_cam = frame.world2cam(voxel_coords)
+        voxel_coords_pix = frame.cam2pix(voxel_coords_cam)
 
         pix_x = voxel_coords_pix[0]
         pix_y = voxel_coords_pix[1]
@@ -183,6 +168,7 @@ if __name__ == "__main__":
         valid_ind2 = np.logical_and(depth_delta < a, depth_delta > -a)
         ind = voxel_coords_ind[valid_ind][valid_ind2]
 
+        # update voxel values
         voxel_picks = voxel[ind[:, 0], ind[:, 1], ind[:, 2]]
         voxel_weight_picks = voxel_weight[ind[:, 0], ind[:, 1], ind[:, 2]]
         
@@ -198,7 +184,7 @@ if __name__ == "__main__":
         writePLY("rgb_tsdf.ply", np.concatenate([ind , img_rgb[pix_y[valid_ind][valid_ind2].astype(int), pix_x[valid_ind][valid_ind2].astype(int)] * v3], axis=1))
 
 
-    raycasted_img = raycast(h,w, pose, K_inv, voxel,voxel_size, voxel_min, a)
+    raycasted_img = raycast(frame.h,frame.w, frame.pose, K_inv, voxel,voxel_size, voxel_min, a)
 
     print(raycasted_img)
     cv2.imshow('image', cv2.cvtColor(raycasted_img.astype(np.uint8), cv2.COLOR_RGB2BGR))
