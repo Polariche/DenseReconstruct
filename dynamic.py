@@ -3,6 +3,7 @@ import cv2
 from numba import jit, njit, prange
 from math import sqrt
 from frame import Frame
+from warpfield import WarpField
 #from pykinect_load import *
 
 def homogenous(x):
@@ -50,7 +51,7 @@ def norm(x):
 def raycast(h, w, pose, K_inv, voxel, voxel_size, voxel_min, a):
     cam_pos = np.array([pose[0,3], pose[1,3], pose[2,3]])
     epsilon = 0.01
-    iter_n = 50
+    iter_n = 70
 
     img = np.ones((h, w, 3))*256
 
@@ -113,8 +114,8 @@ if __name__ == "__main__":
     K = np.loadtxt('data/camera-intrinsics.txt')
     K_inv = np.linalg.inv(K)
 
-    voxel_min = np.zeros(3,1)
-    voxel_max = np.zeros(3,1)
+    voxel_min = np.zeros((3,1))
+    voxel_max = np.zeros((3,1))
 
     for frame_number in range(1,2):
         frame = Frame(frame_number)
@@ -132,22 +133,29 @@ if __name__ == "__main__":
         frustum = np.concatenate([[0], [np.max(frame.img_d)] * 4]) * frustum
         frustum = np.matmul(frame.pose, homogenous(frustum))[:3]
 
-        # create voxel space
         voxel_min = np.min(np.hstack([voxel_min, frustum]), axis=1)
         voxel_max = np.max(np.hstack([voxel_max, frustum]), axis=1)
 
-    voxel_size = 0.02
+    # create voxel space
+    voxel_size = 0.01
     voxel_shape = ((voxel_max - voxel_min) / voxel_size).astype(int)[:3]
 
     voxel = np.ones(voxel_shape)
     voxel_weight = np.zeros(voxel_shape)
 
-    voxel_coords_ind = np.concatenate([x.reshape(1, -1) for x in np.meshgrid(*[range(i) for i in voxel_shape],indexing='ij')], axis=0).T
-    voxel_coords = voxel_coords_ind * voxel_size + voxel_min
+    voxel_coords_ind = np.concatenate([x.reshape(1, -1) for x in np.meshgrid(*[range(i) for i in voxel_shape],indexing='ij')], axis=0)
+    voxel_coords = voxel_coords_ind * voxel_size + voxel_min.reshape(3,1)
 
+    print(voxel_coords)
 
     for frame_number in range(1,2):
         frame = Frame(frame_number)
+        #WarpField(frame, frame)
+
+        #   TODO : DYNAMIC FUSION
+        #   after computing WarpField, 
+        #
+
 
         # convert to cam, pixel coord
         voxel_coords_cam = frame.world2cam(voxel_coords)
@@ -156,17 +164,19 @@ if __name__ == "__main__":
         pix_x = voxel_coords_pix[0]
         pix_y = voxel_coords_pix[1]
 
+
         # only consider voxels inside the pixel range
         valid_ind = np.logical_and(pix_x == np.clip(pix_x, 0, w), pix_y == np.clip(pix_y, 0, h))
         
         voxel_z = voxel_coords_cam[2, valid_ind]
-        voxel_depth = img_d[pix_y[valid_ind].astype(int), pix_x[valid_ind].astype(int)]
+        voxel_depth = frame.img_d[pix_y[valid_ind].astype(int), pix_x[valid_ind].astype(int)]
 
         # find voxels within depth +- error range
         a = voxel_size * 5
+
         depth_delta = voxel_depth - voxel_z
         valid_ind2 = np.logical_and(depth_delta < a, depth_delta > -a)
-        ind = voxel_coords_ind[valid_ind][valid_ind2]
+        ind = voxel_coords_ind.T[valid_ind][valid_ind2]
 
         # update voxel values
         voxel_picks = voxel[ind[:, 0], ind[:, 1], ind[:, 2]]
@@ -175,13 +185,14 @@ if __name__ == "__main__":
         voxel[ind[:, 0], ind[:, 1], ind[:, 2]] = (voxel_weight_picks * voxel_picks + depth_delta[valid_ind2] / a) / (voxel_weight_picks+1)
         voxel_weight[ind[:, 0], ind[:, 1], ind[:, 2]] = voxel_weight_picks + 1
 
+        # draw voxel info into PLY
         v = (voxel[ind[:, 0], ind[:, 1], ind[:, 2]] + 1) / 2
         v3 = np.tile(v.reshape(-1, 1), (1, 3))
 
         #print(np.concatenate([ind, v3], axis=1))
         writePLY("tsdf.ply", np.concatenate([ind, v3 * 255], axis=1))
 
-        writePLY("rgb_tsdf.ply", np.concatenate([ind , img_rgb[pix_y[valid_ind][valid_ind2].astype(int), pix_x[valid_ind][valid_ind2].astype(int)] * v3], axis=1))
+        writePLY("rgb_tsdf.ply", np.concatenate([ind , frame.img_rgb[pix_y[valid_ind][valid_ind2].astype(int), pix_x[valid_ind][valid_ind2].astype(int)] * v3], axis=1))
 
 
     raycasted_img = raycast(frame.h,frame.w, frame.pose, K_inv, voxel,voxel_size, voxel_min, a)

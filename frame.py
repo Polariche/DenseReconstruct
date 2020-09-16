@@ -8,23 +8,23 @@ class Frame:
 
     def __init__(self, frame_number):
         self.K = np.loadtxt('data/camera-intrinsics.txt')
-        self.K_inv = np.linalg.inv(K)
+        self.K_inv = np.linalg.inv(self.K)
         self.img_rgb = cv2.cvtColor(cv2.imread('data/frame-%06d.color.jpg' % frame_number), cv2.COLOR_BGR2RGB)
         self.img_d = cv2.imread('data/frame-%06d.depth.png' % frame_number, -1).astype(float)
-        self.img_d = img_d / 1000.
+        self.img_d = self.img_d / 1000.
 
         self.pose = np.loadtxt('data/frame-%06d.pose.txt' % frame_number)
-        self.pose_inv = np.linalg.inv(pose)
+        self.pose_inv = np.linalg.inv(self.pose)
 
-        self.h, self.w = img_d.shape
+        self.h, self.w = self.img_d.shape
 
         
 
     def world2cam(self, x):
-        return np.dot(self.pose_inv, homogeneous(x))
+        return np.dot(self.pose_inv, homogenous(x))[:3]
 
     def cam2world(self, x):
-        return np.dot(self.pose, homogeneous(x))
+        return np.dot(self.pose, homogenous(x))[:3]
 
     def cam2pix(self, x):
         y = np.dot(self.K, x)
@@ -40,14 +40,14 @@ class Frame:
 
         return y
 
-    def pixel_3d_cam(self, x):
+    def pixel_3d_cam(self):
         n = self.w*self.h
         
-        u = np.array([[i%self.w, int(i/self.w)] for i in range()]).T # raw pixel index; shape is (2, h*w) 
+        u = np.array([[i%self.w, int(i/self.w)] for i in range(n)]).T # raw pixel index; shape is (2, h*w) 
         u_ = homogenous(u)   # homogeneous
 
         # pixels in camera coordinate; shape is (3, h*w)
-        V = img_d.reshape(-1) * np.matmul(K_inv, u_)
+        V = self.img_d.reshape(-1) * np.matmul(self.K_inv, u_)
 
         return V
 
