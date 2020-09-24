@@ -80,9 +80,9 @@ def raycast(h, w, pose, K_inv, voxel, voxel_size, voxel_min, a):
 
                 normal = gradient / norm(gradient)
                 
-                #img[px_point[1], px_point[0]] = (normal * 128 + 128)# * (iter_n - j) / iter_n
+                img[px_point[1], px_point[0]] = (normal * 128 + 128)# * (iter_n - j) / iter_n
 
-                img[px_point[1], px_point[0]] = normal[1] * 128 + 128 # * (iter_n - j) / iter_n
+                #img[px_point[1], px_point[0]] = normal[1] * 128 + 128 # * (iter_n - j) / iter_n
 
                 break
 
@@ -141,20 +141,24 @@ if __name__ == "__main__":
     voxel_shape = ((voxel_max - voxel_min) / voxel_size).astype(int)[:3]
 
     voxel = np.ones(voxel_shape)
+    voxel_col = np.zeros((*voxel_shape, 3))
     voxel_weight = np.zeros(voxel_shape)
 
     voxel_coords_ind = np.concatenate([x.reshape(1, -1) for x in np.meshgrid(*[range(i) for i in voxel_shape],indexing='ij')], axis=0)
     voxel_coords = voxel_coords_ind * voxel_size + voxel_min.reshape(3,1)
 
-    print(voxel_coords)
+    print(voxel_coords_ind.shape)
 
-    for frame_number in range(1,2):
+
+
+    for frame_number in range(1,100):
         frame = Frame(frame_number)
         #WarpField(frame, frame)
 
         #   TODO : DYNAMIC FUSION
-        #   after computing WarpField, 
-        #
+        #   after computing WarpField, transform Frame0 cam coordinates into Frame_n cam coordinates using WarpField
+        #   Frame0 cam2world -> WarpField ------------------------------------------------------------------------> Derivative -> Optimization
+        #                                 -> Frame_n world2cam-> Frame_n cam2pix -> round -> pix2cam2world /     -> (after convergence) Get PSDF   -> Fuse
 
 
         # convert to cam, pixel coord
@@ -178,23 +182,33 @@ if __name__ == "__main__":
         valid_ind2 = np.logical_and(depth_delta < a, depth_delta > -a)
         ind = voxel_coords_ind.T[valid_ind][valid_ind2]
 
+        col = frame.img_rgb[pix_y[valid_ind][valid_ind2].astype(int), pix_x[valid_ind][valid_ind2].astype(int)]
+
         # update voxel values
         voxel_picks = voxel[ind[:, 0], ind[:, 1], ind[:, 2]]
+        voxel_col_picks = voxel_col[ind[:,0], ind[:,1], ind[:,2]]
         voxel_weight_picks = voxel_weight[ind[:, 0], ind[:, 1], ind[:, 2]]
+
         
         voxel[ind[:, 0], ind[:, 1], ind[:, 2]] = (voxel_weight_picks * voxel_picks + depth_delta[valid_ind2] / a) / (voxel_weight_picks+1)
+        voxel_col[ind[:,0], ind[:,1], ind[:,2]] = (voxel_weight_picks.reshape(-1,1) * voxel_col_picks + col) / (voxel_weight_picks+1).reshape(-1,1)
         voxel_weight[ind[:, 0], ind[:, 1], ind[:, 2]] = voxel_weight_picks + 1
 
-        # draw voxel info into PLY
-        v = (voxel[ind[:, 0], ind[:, 1], ind[:, 2]] + 1) / 2
-        v3 = np.tile(v.reshape(-1, 1), (1, 3))
-
-        #print(np.concatenate([ind, v3], axis=1))
-        writePLY("tsdf.ply", np.concatenate([ind, v3 * 255], axis=1))
-
-        writePLY("rgb_tsdf.ply", np.concatenate([ind , frame.img_rgb[pix_y[valid_ind][valid_ind2].astype(int), pix_x[valid_ind][valid_ind2].astype(int)] * v3], axis=1))
+        print(frame_number)
 
 
+    valid_ind = (voxel_weight > 0).reshape(-1)
+    print(valid_ind.shape, ind.shape)
+    ind = voxel_coords_ind.T[valid_ind]
+
+    v = (voxel[ind[:,0], ind[:,1], ind[:,2]] + 1) / 2
+    v3 = np.tile(v.reshape(-1, 1), (1, 3))
+
+    writePLY("tsdf.ply", np.concatenate([ind, v3 * 255], axis=1))
+    writePLY("rgb_tsdf.ply", np.concatenate([ind , voxel_col[ind[:,0], ind[:,1], ind[:,2]]], axis=1))
+
+    
+    
     raycasted_img = raycast(frame.h,frame.w, frame.pose, K_inv, voxel,voxel_size, voxel_min, a)
 
     print(raycasted_img)
