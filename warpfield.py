@@ -122,17 +122,17 @@ class WarpField:
         n = X.shape[1]
 
         # compute normals
-        N = frame1.normal(X)
+        N = frame1.cam2world(frame1.normal(X), rotate_only=True)
 
         # back-project X with frame2 coordinates
-        X_proj = frame2.pix2cam(frame2.cam2pix(X))
+        X_proj = frame2.cam2world(frame2.pix2cam(frame2.cam2pix(X)))
 
         # n_ = qh.transform(n). ignore transform
         N_ = np.array([qh[i].rotation.rotate(N[:,i]) for i in range(n)]).reshape(3,-1)
         dn_dq = np.array([np.hstack([np.dot(qh[i].rotation.d_rotate(N[:,i]), dqh_dq[i, :4, :4]), np.zeros((3,4))]) for i in range(n)])
 
         # x_ = qh.transform(x)
-        X_ = frame2.world2cam(np.array([qh[i].transform(X[:,i]) for i in range(n)]).reshape(3,-1))
+        X_ = np.array([qh[i].transform(X[:,i]) for i in range(n)]).reshape(3,-1)
         dx_dq = np.array([np.dot(qh[i].d_transform(X[:,i]), dqh_dq[i, :8, :8]) for i in range(n)])
 
 
