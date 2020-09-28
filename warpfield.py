@@ -48,13 +48,10 @@ class WarpField:
         n_ = dq.rotation.rotate(n)
         n_ = frame.world2cam(n, rotate_only=True)
         
-        
 
         dweight = dist/(2*weight*weight)
 
-
         ddq = np.array([np.hstack([np.identity(8), nodes_dq[:,i].reshape(-1,1)*dweight[:,i]]) * weight_ex[:,i] for i in range(self.k)])
-        
         ddqh = np.identity(8)/nodes_dqh_norm - np.dot(nodes_dqh,nodes_dqh.T) / np.power(nodes_dqh_norm, 3)
        
         dT1 = dq.d_transform(x)
@@ -69,13 +66,14 @@ class WarpField:
         
         return cost, jacobian
 
-    def optimize(self, X):
-        def cost(nodes):
-            pass
+    def optimize(self, X, frame):
+        # compute kdtree and normals
 
-        def jacobian(nodes):
-            pass
+        cost = np.zeros((X.shape[1], 1))
+        jacobian = np.zeros((X.shape[1], self.nodes.shape[1]*9))
 
+        cost[0], jac_frag = self._fit(X[0], N[0], ind[:,0], frame)
+        jacobian[0, ind[1,0]*9:ind[1,0]*9+9] = jac_frag[1]
 
 
 if __name__ == "__main__":
