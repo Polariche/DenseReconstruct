@@ -9,11 +9,11 @@ import numbers
 class Quaternion:
     __array_priority__ = 15.0   # I need it to make rmul with np.arrays work
 
-    def __init__(self):
-        self.w = 1
-        self.x = 0
-        self.y = 0
-        self.z = 0
+    def __init__(self, w=1, x=0, y=0, z=0):
+        self.w = np.asscalar(w)
+        self.x = np.asscalar(x)
+        self.y = np.asscalar(y)
+        self.z = np.asscalar(z)
 
     def array(self):
         return np.array([self.w, self.x, self.y, self.z])
@@ -238,9 +238,9 @@ class Quaternion:
 
 
 class DualQuaternion:
-    def __init__(self, rotation, translation):
-        self.rotation = rotation
-        self.translation = 0.5*translation*rotation
+    def __init__(self, w=1, x=0, y=0, z=0, w2=0, x2=0, y2=0, z2=0):
+        self.rotation = Quaternion(w,x,y,z) #rotation
+        self.translation = Quaternion(w2,x2,y2,z2) #0.5*translation*rotation
 
     def getTranslation(self):
         return np.array((2 * self.translation * self.rotation.conjugate())[1:])
@@ -264,6 +264,12 @@ class DualQuaternion:
     def array(self):
         return np.array([self.rotation.w, self.rotation.x, self.rotation.y, self.rotation.z, 
         self.translation.w, self.translation.x, self.translation.y, self.translation.z])
+
+    def encodeArray(self, x):
+        self.rotation.encodeArray(x[:4])
+        self.translation.encodeArray(x[4:])
+
+        return self
 
     def __add__(self, other):
         if isinstance(other, DualQuaternion):

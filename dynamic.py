@@ -3,7 +3,7 @@ import cv2
 from numba import jit, njit, prange
 from math import sqrt
 from frame import Frame
-from warpfield import WarpField
+#from warpfield import WarpField
 #from pykinect_load import *
 
 def homogenous(x):
@@ -46,6 +46,17 @@ def matmul(pose, x):
 def norm(x):
     return sqrt(x[0]*x[0] + x[1]*x[1] + x[2]*x[2])
 
+@jit(nopython=True)
+def get_normal(x, voxel):
+    h = 1.2
+    xp = [min(voxel.shape[0], x[0]+h), min(voxel.shape[1], x[1]+h), min(voxel.shape[2], x[2]+h)]
+    xm = [max(0, x[0]-h), max(1, x[1]-h), max(2, x[2]-h)]
+
+    gradient = np.array([-bilinear([xp[0], x[1], x[2]], voxel) + bilinear([xm[0], x[1], x[2]], voxel),
+                        -bilinear([x[0], xp[1], x[2]], voxel) + bilinear([x[0], xm[1], x[2]], voxel),
+                        -bilinear([x[0], x[1], xp[2]], voxel) + bilinear([x[0], x[1], xm[2]], voxel)])
+
+    return gradient / norm(gradient)
 
 @njit(parallel = True)
 def raycast(h, w, pose, K_inv, voxel, voxel_size, voxel_min, a):
@@ -70,15 +81,7 @@ def raycast(h, w, pose, K_inv, voxel, voxel_size, voxel_min, a):
 
             if dist < epsilon:
                 # get normal
-                h = 1.2
-                xp = [min(voxel.shape[0], x[0]+h), min(voxel.shape[1], x[1]+h), min(voxel.shape[2], x[2]+h)]
-                xm = [max(0, x[0]-h), max(1, x[1]-h), max(2, x[2]-h)]
-
-                gradient = np.array([-bilinear([xp[0], x[1], x[2]], voxel) + bilinear([xm[0], x[1], x[2]], voxel),
-                                    -bilinear([x[0], xp[1], x[2]], voxel) + bilinear([x[0], xm[1], x[2]], voxel),
-                                    -bilinear([x[0], x[1], xp[2]], voxel) + bilinear([x[0], x[1], xm[2]], voxel)])
-
-                normal = gradient / norm(gradient)
+                normal = get_normal(x, voxel)
                 
                 img[px_point[1], px_point[0]] = (normal * 128 + 128)# * (iter_n - j) / iter_n
 
@@ -151,9 +154,9 @@ if __name__ == "__main__":
 
 
 
-    for frame_number in range(1,100):
+    for frame_number in range(2):
         frame = Frame(frame_number)
-        #WarpField(frame, frame)
+        
 
         #   TODO : DYNAMIC FUSION
         #   after computing WarpField, transform Frame0 cam coordinates into Frame_n cam coordinates using WarpField

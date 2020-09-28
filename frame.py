@@ -39,8 +39,9 @@ class Frame:
     def cam2pix(self, x):
         x = x.reshape(3,-1)
 
-        y = np.dot(self.K, x)
-        return (y/y[2])[:2]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            y = np.dot(self.K, x)
+            return (y/y[2])[:2]
 
     def pix2cam(self, x):
         x = x.reshape(2,-1)
