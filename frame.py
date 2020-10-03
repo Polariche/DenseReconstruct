@@ -7,13 +7,13 @@ def homogenous(x):
 class Frame:
 
     def __init__(self, frame_number):
-        self.K = np.loadtxt('data/camera-intrinsics.txt')
+        self.K = np.loadtxt('VolumeDeformData/minion/data/colorIntrinsics.txt')[:3,:3]
         self.K_inv = np.linalg.inv(self.K)
-        self.img_rgb = cv2.cvtColor(cv2.imread('data/frame-%06d.color.jpg' % frame_number), cv2.COLOR_BGR2RGB)
-        self.img_d = cv2.imread('data/frame-%06d.depth.png' % frame_number, -1).astype(float)
+        self.img_rgb = cv2.cvtColor(cv2.imread('VolumeDeformData/minion/data/frame-%06d.color.png' % frame_number), cv2.COLOR_BGR2RGB)
+        self.img_d = cv2.imread('VolumeDeformData/minion/data/frame-%06d.depth.png' % frame_number, -1).astype(float)
         self.img_d = self.img_d / 1000.
 
-        self.pose = np.loadtxt('data/frame-%06d.pose.txt' % frame_number)
+        self.pose = np.identity(4) #np.loadtxt('data/frame-%06d.pose.txt' % frame_number)
         self.pose_inv = np.linalg.inv(self.pose)
 
         self.h, self.w = self.img_d.shape

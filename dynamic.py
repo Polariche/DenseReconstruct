@@ -48,7 +48,7 @@ def norm(x):
 
 @jit(nopython=True)
 def get_normal(x, voxel):
-    h = 1.2
+    h = 0.5
     xp = [min(voxel.shape[0], x[0]+h), min(voxel.shape[1], x[1]+h), min(voxel.shape[2], x[2]+h)]
     xm = [max(0, x[0]-h), max(1, x[1]-h), max(2, x[2]-h)]
 
@@ -62,7 +62,7 @@ def get_normal(x, voxel):
 def raycast(h, w, pose, K_inv, voxel, voxel_size, voxel_min, a):
     cam_pos = np.array([pose[0,3], pose[1,3], pose[2,3]])
     epsilon = 0.01
-    iter_n = 70
+    iter_n = 40
 
     img = np.ones((h, w, 3))*256
 
@@ -70,7 +70,7 @@ def raycast(h, w, pose, K_inv, voxel, voxel_size, voxel_min, a):
         px_point = [i%w, int(i/w), 1]
         ray = project(pose, matmul(K_inv, px_point)) - cam_pos
         dist = 1.
-        travel = 0.1
+        travel = 0.5
 
         for j in range(iter_n):
             x = ray * travel * a + cam_pos
@@ -83,9 +83,9 @@ def raycast(h, w, pose, K_inv, voxel, voxel_size, voxel_min, a):
                 # get normal
                 normal = get_normal(x, voxel)
                 
-                img[px_point[1], px_point[0]] = (normal * 128 + 128)# * (iter_n - j) / iter_n
+                #img[px_point[1], px_point[0]] = (normal * 128 + 128)# * (iter_n - j) / iter_n
 
-                #img[px_point[1], px_point[0]] = normal[1] * 128 + 128 # * (iter_n - j) / iter_n
+                img[px_point[1], px_point[0]] = normal[1] * 128 + 128 # * (iter_n - j) / iter_n
 
                 break
 
@@ -114,8 +114,6 @@ def writePLY(filename, X):
 
 if __name__ == "__main__":
     # intrinsics
-    K = np.loadtxt('data/camera-intrinsics.txt')
-    K_inv = np.linalg.inv(K)
 
     voxel_min = np.zeros((3,1))
     voxel_max = np.zeros((3,1))
@@ -140,7 +138,7 @@ if __name__ == "__main__":
         voxel_max = np.max(np.hstack([voxel_max, frustum]), axis=1)
 
     # create voxel space
-    voxel_size = 0.01
+    voxel_size = 0.005
     voxel_shape = ((voxel_max - voxel_min) / voxel_size).astype(int)[:3]
 
     voxel = np.ones(voxel_shape)
@@ -209,12 +207,9 @@ if __name__ == "__main__":
 
     writePLY("tsdf.ply", np.concatenate([ind, v3 * 255], axis=1))
     writePLY("rgb_tsdf.ply", np.concatenate([ind , voxel_col[ind[:,0], ind[:,1], ind[:,2]]], axis=1))
-
     
-    
-    raycasted_img = raycast(frame.h,frame.w, frame.pose, K_inv, voxel,voxel_size, voxel_min, a)
+    raycasted_img = raycast(frame.h,frame.w, frame.pose, frame.K_inv, voxel,voxel_size, voxel_min, a)
 
-    print(raycasted_img)
     cv2.imshow('image', cv2.cvtColor(raycasted_img.astype(np.uint8), cv2.COLOR_RGB2BGR))
     #cv2.imshow('image', cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
     cv2.waitKey(0)
